@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 import inspect
 from dataclasses import dataclass
-from pprint import pprint
-from typing import Callable
-
-from bpython.curtsiesfrontend.coderunner import SystemExitFromCodeRunner
+from typing import Callable, Optional, List
 
 _globals = globals().copy()
 
 import argparse
-import code
+from code import InteractiveConsole
 import sys
-import types
 from pathlib import Path
 
 
@@ -22,12 +18,13 @@ class DbgQuit:
 
 
 # handles DbgQuit properly
-class CustomInteractiveConsole(code.InteractiveConsole):
+class CustomInteractiveConsole(InteractiveConsole):
 
-    def __init__(self, locals: dict, filename="<console>"):
-        super().__init__(locals, filename)
+    def __init__(self, _locals: dict, filename="<console>"):
+        super().__init__(_locals, filename)
+        self.locals = _locals
 
-    def runcode(self, code: types.CodeType):
+    def runcode(self, code):
         try:
             exec(code, self.locals)
         except SystemExit:
@@ -43,11 +40,74 @@ class Dbg:
         self._in_breakpoint = False
         self._st = {}  # store between evals
         self.bpython = None
+        # the default code formatter does not highlight the code
+        self.code_formatter: Callable[[str, Callable[[int], str]], str] = \
+            lambda code, line_prefix: "\n".join(line_prefix(i) + l
+                                                for i, l in enumerate(code.splitlines()))
         try:
             import bpython
             self.bpython = bpython
+            from pygments import format as pygformat
+            from bpython.formatter import BPythonFormatter
+            from pygments.formatters.terminal import TerminalFormatter
+            from pygments.lexers.python import Python3Lexer
+
+            # custom terminal formatter for code
+            # which let's use a different line number formatter
+            class CustomTerminalFormatter(TerminalFormatter):
+
+                def __init__(self, line_prefix):
+                    super().__init__(linenos=True)
+                    self._lineno = 0
+                    self.line_prefix = line_prefix
+
+                def _write_lineno(self, outfile):
+                    self._lineno += 1
+                    if self._lineno != 1:
+                        outfile.write('\n')
+                    outfile.write(self.line_prefix(self._lineno))
+
+            self.code_formatter = lambda code, line_prefix: pygformat(
+                Python3Lexer().get_tokens(code), CustomTerminalFormatter(line_prefix)
+            )
         except ImportError:
             pass
+        self.print_code(code=Path(__file__).read_text(), current_line=1, breakpoints=list(range(1, 10)))
+
+    """
+    Print code on the command line
+
+    :param code: the code to print
+    :param current_line: the current line that should be highlighted, -1 to not highlight anything
+    :param breakpoints: breakpoints to highlight
+    :param header: header to print before the code
+    """
+
+    def print_code(self, *,
+                   code: str,
+                   current_line: int = -1,
+                   breakpoints: Optional[List[int]] = None,
+                   header: Optional[str] = None,
+                   start_line: int = 1,
+                   end_line: int = -1,
+                   code_start_line: int = 1):
+        subset = code.rstrip().splitlines()[start_line - code_start_line:max(end_line - code_start_line, end_line)]
+        max_line_number_digits = min(len(str(max(end_line, code_start_line + len(subset)))), 4)
+        has_prefix = current_line >= 0 or breakpoints
+
+        def format_line_number(relative_line_number: int):
+            line_number = relative_line_number + start_line - 1
+            line_number_part = f"{line_number:>{max_line_number_digits}} "
+            prefix = ""
+            suffix = ""
+            if has_prefix:
+                prefix = (">" if current_line == line_number else " ") + " "
+                suffix = ("*" if breakpoints is not None and line_number in breakpoints else " ") + " "
+            return prefix + line_number_part + suffix
+
+        if header:
+            print(header)
+        print(self.code_formatter("\n".join(subset), format_line_number))
 
     def _fancy_eval(self, _locals: dict, message: str):
         ret = self.bpython.embed(locals_=_locals, banner=message)
@@ -110,6 +170,43 @@ class Dbg:
             """show local variables"""
             return frame.f_locals
 
+        location = f"{frame.f_code.co_filename}:{frame.f_lineno} ({frame.f_code.co_name})"
+
+        @func
+        def _location():
+            """show current location"""
+            return location
+
+        def show(file=None, start=1, end=-1, header=None):
+            """show code"""
+            code = Path(file or frame.f_code.co_filename).read_text()
+            self.print_code(code=code,
+                            current_line=frame.f_lineno,
+                            start_line=max(1, start),
+                            end_line=end)
+
+        @func
+        def context(pre: int = 4, post: int = 4):
+            """show context"""
+            print(f"{frame.f_code.co_filename}:{frame.f_code.co_firstlineno} ({frame.f_code.co_name})")
+            show(start=frame.f_lineno - pre, end=frame.f_lineno + post)
+
+        @func
+        def current_file():
+            """show current file"""
+            show()
+
+        @func
+        def show_function(func=None):
+            """show function"""
+            if func is None:
+                co = frame.f_code
+                file = None
+            else:
+                co = func.__code__
+                file = inspect.getsourcefile(func)
+            show(file, start=co.co_firstlineno, end=co.co_firstlineno + len(inspect.getsource(co).splitlines()) - 1)
+
         @func
         def dbg_help():
             """show this help"""
@@ -131,8 +228,7 @@ class Dbg:
         helpers["_h"] = helpers
 
         self._in_breakpoint = True
-
-        message = f"breakpoint at {frame.f_code.co_filename}:{frame.f_lineno} ({frame.f_code.co_name})"
+        message = f"breakpoint at {location}"
         self._eval(_locals=frame.f_locals | helpers | frame.f_globals, message=message)
 
         self._in_breakpoint = False
