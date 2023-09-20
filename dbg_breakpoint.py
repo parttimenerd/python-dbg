@@ -12,13 +12,13 @@ import sys
 from pathlib import Path
 
 
-# quit the current dbg shell
 @dataclass
-class DbgQuit:
+class DbgContinue:
     exit: bool = False
+    """ exit the program? """
 
 
-# handles DbgQuit properly
+# handles DbgContinue properly
 class CustomInteractiveConsole(InteractiveConsole):
 
     def __init__(self, _locals: dict, filename="<console>"):
@@ -111,7 +111,7 @@ class Dbg:
 
     def _fancy_eval(self, _locals: dict, message: str):
         ret = self.bpython.embed(locals_=_locals, banner=message)
-        if isinstance(ret, DbgQuit):
+        if isinstance(ret, DbgContinue):
             if ret.exit:
                 exit()
         elif ret is not None:
@@ -123,7 +123,7 @@ class Dbg:
             print(message)
             CustomInteractiveConsole(_locals).interact(banner="", exitmsg="")
         except SystemExit as e:
-            if isinstance(e.args[0], DbgQuit):
+            if isinstance(e.args[0], DbgContinue):
                 if e.args[0].exit:
                     exit()
             else:
@@ -150,20 +150,20 @@ class Dbg:
             return f
 
         @func
-        def end():
-            """end shell for this breakpoint"""
-            raise SystemExit(DbgQuit(exit=False))
+        def _cont():
+            """continue the program execution"""
+            raise SystemExit(DbgContinue(exit=False))
 
         @func
         def skip_breaks(count: int):
             """skip breakpoints"""
             self._skip_count = count
-            end()
+            _cont()
 
         @func
         def _exit():
             """exit the program"""
-            raise SystemExit(DbgQuit(exit=True))
+            raise SystemExit(DbgContinue(exit=True))
 
         @func
         def _locals():
@@ -224,7 +224,7 @@ class Dbg:
                 name = "{:<20}".format(f"{k}({','.join(inspect.signature(v).parameters.keys())})")
                 parts[name] = inspect.getdoc(v)
             longest = max(len(k) for k in parts.keys())
-            print("  Ctrl-D to end breakpoint")
+            print("  Ctrl-D to continue")
             for k, v in parts.items():
                 print(f"  {k:<{longest}}   {v}")
 
