@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import inspect
+import traceback
 from dataclasses import dataclass
 from typing import Callable, Optional, List
 
@@ -72,7 +73,6 @@ class Dbg:
             )
         except ImportError:
             pass
-        self.print_code(code=Path(__file__).read_text(), current_line=1, breakpoints=list(range(1, 10)))
 
     """
     Print code on the command line
@@ -195,6 +195,11 @@ class Dbg:
         def current_file():
             """show current file"""
             show()
+
+        @func
+        def stacktrace():
+            """show stacktrace"""
+            print("".join(traceback.format_stack(frame)))
 
         @func
         def show_function(func=None):
