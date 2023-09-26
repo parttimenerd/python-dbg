@@ -228,11 +228,7 @@ class Dbg:
         @func
         def _cont():
             """continue the program execution"""
-            if self._single_step_instead_of_continue:
-                step(self._single_step_instead_of_continue_into,
-                     self._single_step_instead_of_continue_out)
-            else:
-                raise SystemExit(DbgContinue(exit=False))
+            raise SystemExit(DbgContinue(exit=False))
 
         @func
         def skip_breaks(count: int):
@@ -328,16 +324,19 @@ class Dbg:
                 for file in self._breakpoints_in_files.keys():
                     remove_all_breaks(str(file))
 
+        def _step_setup(into=False, out=False):
+            assert not (into and out)
+            self._single_step = True
+            self._single_step_frame = frame
+            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.step
+
         @func
         def step(into=False, out=False):
             """
             make a single step, into (default:False) to step into calls too,
             out (default:False) to step out of calls only
             """
-            assert not (into and out)
-            self._single_step = True
-            self._single_step_frame = frame
-            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.step
+            _step_setup(into, out)
             raise SystemExit(DbgContinue(exit=False))
 
         @func
@@ -388,6 +387,9 @@ class Dbg:
             context()
         self._eval(_locals=frame.f_locals | helpers | frame.f_globals, message=message)
 
+        if self._single_step_instead_of_continue:
+            _step_setup(self._single_step_instead_of_continue_into, self._single_step_instead_of_continue_out)
+
         self._in_breakpoint = False
 
     def _has_break_point_in(self, code: types.CodeType) -> bool:
@@ -404,7 +406,7 @@ class Dbg:
 
     def _default_dispatch(self, frame: types.FrameType, event, arg):
         if event == 'call':
-            frame.f_trace_lines = True
+            frame.f_trace_lines = False
             return self._dispatch_trace
 
 
@@ -420,8 +422,10 @@ class Dbg:
         return False
 
 
-
     def _dispatch_trace(self, frame: types.FrameType, event, arg):
+        if event == 'return' and frame.f_code.co_name == '<module>' and \
+                frame.f_back and frame.f_back.f_code.co_filename == __file__:
+            return
         if self._is_first_call and self._main_file == Path(frame.f_code.co_filename):
             self._is_first_call = False
             self._breakpoint(frame, show_context=False, reason="start")
