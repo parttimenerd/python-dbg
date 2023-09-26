@@ -10,7 +10,7 @@ from code import InteractiveConsole
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional, Dict, Set
+from typing import Callable, Optional, Dict, Set, Tuple
 
 _globals = globals().copy()
 
@@ -100,6 +100,7 @@ class Dbg:
             pass
         # file -> {line numbers of break points}
         self._breakpoints_in_files: Dict[Path, Set[int]] = {}
+        self._breakpoint_conditions: Dict[Tuple[Path, int], str] = {}
         # file -> {starting numbers of scopes with breakpoints mapped to the breakpoint count}
         self._scopes_with_breakpoint: Dict[Path, Dict[int, int]] = {}
         # file -> {line number of breakpoint -> starting line number of scope}
@@ -113,7 +114,7 @@ class Dbg:
         self._single_step_instead_of_continue_into = False
         self._single_step_instead_of_continue_out = False
 
-    def add_breakpoint(self, file: Path, line: int, scope_start_line: int):
+    def add_breakpoint(self, file: Path, line: int, scope_start_line: int, condition: Optional[str] = None):
         if file not in self._breakpoints_in_files:
             self._breakpoints_in_files[file] = set()
         self._breakpoints_in_files[file].add(line)
@@ -125,6 +126,8 @@ class Dbg:
         if file not in self._breakpoint_to_scope_start:
             self._breakpoint_to_scope_start[file] = {}
         self._breakpoint_to_scope_start[file][line] = scope_start_line
+        if condition:
+            self._breakpoint_conditions[(file, line)] = condition
 
     def remove_breakpoint(self, file: Path, line: int, scope_start_line: int):
         if file in self._breakpoints_in_files:
@@ -134,11 +137,16 @@ class Dbg:
                 if self._scopes_with_breakpoint[file][scope_start_line] == 0:
                     del self._scopes_with_breakpoint[file][scope_start_line]
             del self._breakpoint_to_scope_start[file][line]
+            del self._breakpoint_conditions[(file, line)]
 
-    def get_breakpoints(self, file: Path) -> Set[int]:
+    def _get_breakpoint_condition(self, file: Path, line: int) -> Optional[str]:
+        if (file, line) in self._breakpoint_conditions:
+            return self._breakpoint_conditions[(file, line)]
+
+    def get_breakpoints(self, file: Path) -> Dict[int, Optional[str]]:
         if file not in self._breakpoints_in_files:
-            return set()
-        return self._breakpoints_in_files[file]
+            return {}
+        return {b:self._get_breakpoint_condition(file, b) for b in self._breakpoints_in_files[file]}
 
     """
     Print code on the command line
@@ -152,12 +160,14 @@ class Dbg:
     def print_code(self, *,
                    code: str,
                    current_line: int = -1,
-                   breakpoints: Optional[Set[int]] = None,
+                   breakpoints: Optional[Dict[int, Optional[str]]] = None,
                    header: Optional[str] = None,
                    start_line: int = 1,
                    end_line: int = -1,
                    code_start_line: int = 1):
-        subset = code.splitlines()[start_line - code_start_line:max(end_line - code_start_line, end_line)]
+        lines = code.splitlines()
+        end_line = len(lines) if end_line == -1 else end_line - code_start_line
+        subset = lines[start_line - code_start_line:end_line]
         max_line_number_digits = min(len(str(max(end_line, code_start_line + len(subset)))), 4)
         has_prefix = current_line >= 0 or breakpoints
 
@@ -170,7 +180,10 @@ class Dbg:
             suffix = ""
             if has_prefix:
                 prefix = (">" if current_line == line_number else " ") + " "
-                suffix = ("*" if breakpoints is not None and line_number in breakpoints else " ") + " "
+                if breakpoints and line_number in breakpoints:
+                    suffix = "*"
+                    if breakpoints[line_number] is not None:
+                        suffix += " " + breakpoints[line_number]
             return prefix + line_number_part + suffix
 
         if header:
@@ -294,16 +307,16 @@ class Dbg:
             show(file, start=co.co_firstlineno, end=co.co_firstlineno + len(inspect.getsource(co).splitlines()) - 1)
 
         @func
-        def break_at_func(func: Callable = None, line: int = -1):
-            """break at function (optional line number)"""
-            self.add_breakpoint(Path(inspect.getsourcefile(func)), line, func.__code__.co_firstlineno)
+        def break_at_func(func: Callable = None, line: int = -1, condition: Optional[str] = None):
+            """break at function (optional line number, optional condition string)"""
+            self.add_breakpoint(Path(inspect.getsourcefile(func)), line, func.__code__.co_firstlineno, condition)
 
         @func
-        def break_at_line(file: str, func: str, line: int = -1):
-            """break at line in file, -1 first line in function"""
+        def break_at_line(file: str, func: str, line: int = -1, condition: Optional[str] = None):
+            """break at line in file, -1 first line in function, optional condition string"""
             start_line = find_function(func, file)
             if start_line is not None:
-                self.add_breakpoint(Path(file), start_line + 1 if line == -1 else line, start_line)
+                self.add_breakpoint(Path(file), start_line + 1 if line == -1 else line, start_line, condition)
             else:
                 print("No such function")
 
@@ -323,7 +336,7 @@ class Dbg:
         def remove_all_breaks(file: Optional[str] = None):
             """remove all breakpoints, in the file or all files if file is None"""
             if file:
-                for line in list(self.get_breakpoints(Path(file))):
+                for line, condition in list(self.get_breakpoints(Path(file)).items()):
                     self.remove_breakpoint(Path(file), line, self._breakpoint_to_scope_start[Path(file)][line])
             else:
                 for file in self._breakpoints_in_files.keys():
@@ -371,7 +384,8 @@ class Dbg:
             """show this help"""
             parts = {"_h": "dict with all helper functions",
                      "_st": "store dict, shared between shells",
-                     "_frame": "current frame"}
+                     "_frame": "current frame",
+                     "_dbg": "debugger"}
             for k, v in helpers.items():
                 if not isinstance(v, Callable):
                     continue
@@ -387,6 +401,7 @@ class Dbg:
         helpers["_st"] = self._st
         helpers["_frame"] = frame
         helpers["_h"] = helpers
+        helpers["_dbg"] = self
 
         self._in_breakpoint = True
         message = f"{reason} at {location}"
@@ -405,7 +420,10 @@ class Dbg:
 
     def _should_break_at(self, frame: types.FrameType) -> bool:
         p = Path(frame.f_code.co_filename)
-        return p in self._breakpoints_in_files and frame.f_lineno in self._breakpoints_in_files[p]
+        if p in self._breakpoints_in_files and frame.f_lineno in self._breakpoints_in_files[p]:
+            if (p, frame.f_lineno) in self._breakpoint_conditions:
+                return eval(self._breakpoint_conditions[(p, frame.f_lineno)], frame.f_globals, frame.f_locals)
+            return True
 
     def _handle_line(self, frame: types.FrameType):
         if self._should_break_at(frame):

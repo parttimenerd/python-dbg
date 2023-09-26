@@ -3,7 +3,7 @@ Python debugger experiments
 
 A simple python debugger, with a simple debugger shell
 which allows you to step through a program,
-set breakpoints, and explore local variables,
+set breakpoints (with conditions), and explore local variables,
 as well as running arbitrary python code.
 
 The main purpose of this project is to show
@@ -138,34 +138,35 @@ as well we many other commands:
 ```python
 >>> dbg_help()
   Ctrl-D to continue
-  _h                                     dict with all helper functions
-  _st                                    store dict, shared between shells
-  _frame                                 current frame
-  cont()                                 continue the program execution
-  skip_breaks(count)                     skip breakpoints
-  exit()                                 exit the program
-  locals()                               show local variables
-  location()                             show current location
-  show(file,start,end,header)            show code, file (default:None, current file),
-                                         start (default:1), end (default:-1)
-  context(pre,post)                      show context of current location,
-                                         pre (default:4) lines before, post (default:4) lines after
-  current_file()                         show current file
-  stacktrace()                           show stacktrace
-  show_function(func)                    show code of function, func (default:None) current function
-  break_at_func(func,line)               break at function (optional line number)
-  break_at_line(file,func,line)          break at line in file, -1 first line in function
-  remove_break(func,line)                remove breakpoint in function object
-  remove_break_at_line(file,func,line)   remove breakpoint in function
-  remove_all_breaks(file)                remove all breakpoints, in the file or all files if file is None
-  step(into,out)                         make a single step, into (default:False) to step into calls too,
-                                         out (default:False) to step out of calls only
-  step_into()                            make a single step and step into calls too
-  step_out()                             make a single step and step out of calls
-  single_stepping(enable,into,out)       enable (default:True) and disable to step instead of continue,
-                                         into (default:False) to step into calls,
-                                         out (default:False) to step out of calls only
-  dbg_help()                             show this help
+  _h                                        dict with all helper functions
+  _st                                       store dict, shared between shells
+  _frame                                    current frame
+  _dbg                                      debugger
+  cont()                                    continue the program execution
+  skip_breaks(count)                        skip breakpoints
+  exit()                                    exit the program
+  locals()                                  show local variables
+  location()                                show current location
+  show(file,start,end,header)               show code, file (default:None, current file),
+                                            start (default:1), end (default:-1)
+  context(pre,post)                         show context of current location,
+                                            pre (default:4) lines before, post (default:4) lines after
+  current_file()                            show current file
+  stacktrace()                              show stacktrace
+  show_function(func)                       show code of function, func (default:None) current function
+  break_at_func(func,line,condition)        break at function (optional line number, optional condition string)
+  break_at_line(file,func,line,condition)   break at line in file, -1 first line in function, optional condition string
+  remove_break(func,line)                   remove breakpoint in function object
+  remove_break_at_line(file,func,line)      remove breakpoint in function
+  remove_all_breaks(file)                   remove all breakpoints, in the file or all files if file is None
+  step(into,out)                            make a single step, into (default:False) to step into calls too,
+                                            out (default:False) to step out of calls only
+  step_into()                               make a single step and step into calls too
+  step_out()                                make a single step and step out of calls
+  single_stepping(enable,into,out)          enable (default:True) and disable to step instead of continue,
+                                            into (default:False) to step into calls,
+                                            out (default:False) to step out of calls only
+  dbg_help()                                show this help
 ```
 
 And it supports to create a breakpoint using the `breakpoint()` function
