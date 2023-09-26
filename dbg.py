@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
+import argparse
 import inspect
 import re
+import sys
 import tokenize
 import traceback
 import types
+from code import InteractiveConsole
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional, List, Dict, Set, Tuple
+from pathlib import Path
+from typing import Callable, Optional, Dict, Set
 
 _globals = globals().copy()
-
-import argparse
-from code import InteractiveConsole
-import sys
-from pathlib import Path
 
 
 @dataclass
@@ -215,9 +214,6 @@ class Dbg:
             self._skip_count -= 1
             return
         frame = frame or sys._getframe(1)
-        if not frame.f_trace_lines:
-            # happens if we came here due to a breakpoint() call
-            frame.f_trace_lines = True
 
         helpers = {}
 
@@ -406,9 +402,7 @@ class Dbg:
 
     def _default_dispatch(self, frame: types.FrameType, event, arg):
         if event == 'call':
-            frame.f_trace_lines = False
             return self._dispatch_trace
-
 
     def _should_single_step(self, frame: types.FrameType, event) -> bool:
         if not self._single_step:
@@ -421,7 +415,6 @@ class Dbg:
             return frame == self._single_step_frame
         return False
 
-
     def _dispatch_trace(self, frame: types.FrameType, event, arg):
         if event == 'return' and frame.f_code.co_name == '<module>' and \
                 frame.f_back and frame.f_back.f_code.co_filename == __file__:
@@ -433,7 +426,6 @@ class Dbg:
         if self._should_single_step(frame, event):
             if event == 'return':
                 if frame.f_back:
-                    frame.f_back.f_trace_lines = True
                     self._single_step_frame = frame.f_back
                     self._breakpoint(frame.f_back, reason="step")
                     if self._step_mode == StepMode.out:
