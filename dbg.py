@@ -5,7 +5,7 @@ import tokenize
 import traceback
 import types
 from dataclasses import dataclass
-from pprint import pprint
+from enum import Enum
 from typing import Callable, Optional, List, Dict, Set, Tuple
 
 _globals = globals().copy()
@@ -53,9 +53,16 @@ def find_function(funcname: str, filename: str) -> Optional[int]:
     return None
 
 
+class StepMode(Enum):
+    step = 0
+    into = 1
+    out = 2
+
+
 class Dbg:
 
     def __init__(self):
+        self._main_file: Optional[Path] = None
         self._skip_count = 0
         self._in_breakpoint = False
         self._st = {}  # store between evals
@@ -101,8 +108,11 @@ class Dbg:
         self._is_first_call = True
         self._single_step = False
         self._single_step_frame: Optional[types.FrameType] = None
-        self._step_into = False
+        self._step_mode = StepMode.step
         """ if true, step into functions when single stepping """
+        self._single_step_instead_of_continue = False
+        self._single_step_instead_of_continue_into = False
+        self._single_step_instead_of_continue_out = False
 
     def add_breakpoint(self, file: Path, line: int, scope_start_line: int):
         if file not in self._breakpoints_in_files:
@@ -219,7 +229,8 @@ class Dbg:
         def _cont():
             """continue the program execution"""
             if self._single_step_instead_of_continue:
-                step(self._single_step_instead_of_continue_into is True)
+                step(self._single_step_instead_of_continue_into,
+                     self._single_step_instead_of_continue_out)
             else:
                 raise SystemExit(DbgContinue(exit=False))
 
@@ -318,26 +329,38 @@ class Dbg:
                     remove_all_breaks(str(file))
 
         @func
-        def step(into=False):
-            """make a single step, into (default:False) to step into calls"""
+        def step(into=False, out=False):
+            """
+            make a single step, into (default:False) to step into calls too,
+            out (default:False) to step out of calls only
+            """
+            assert not (into and out)
             self._single_step = True
             self._single_step_frame = frame
-            self._step_into = into
+            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.step
             raise SystemExit(DbgContinue(exit=False))
 
         @func
         def step_into():
-            """make a single step and step into calls"""
+            """make a single step and step into calls too"""
             step(into=True)
 
         @func
-        def single_stepping(enable: bool, into = False):
+        def step_out():
+            """make a single step and step out of calls"""
+            step(out=True)
+
+        @func
+        def single_stepping(enable: bool = True, into=False, out=False):
             """
-            enable and disable to step instead of continue,
-            into (default:False) to step into calls
+            enable (default:True) and disable to step instead of continue,
+            into (default:False) to step into calls,
+            out (default:False) to step out of calls only
             """
+            assert not (into and out)
             self._single_step_instead_of_continue = enable
             self._single_step_instead_of_continue_into = into
+            self._single_step_instead_of_continue_out = out
 
         @func
         def dbg_help():
@@ -369,7 +392,7 @@ class Dbg:
 
     def _has_break_point_in(self, code: types.CodeType) -> bool:
         return Path(code.co_filename) in self._breakpoints_in_files and \
-                  code.co_firstlineno in self._scopes_with_breakpoint[Path(code.co_filename)]
+            code.co_firstlineno in self._scopes_with_breakpoint[Path(code.co_filename)]
 
     def _should_break_at(self, frame: types.FrameType) -> bool:
         p = Path(frame.f_code.co_filename)
@@ -384,19 +407,37 @@ class Dbg:
             frame.f_trace_lines = True
             return self._dispatch_trace
 
+
+    def _should_single_step(self, frame: types.FrameType, event) -> bool:
+        if not self._single_step:
+            return False
+        if self._step_mode == StepMode.step:
+            return frame == self._single_step_frame
+        if self._step_mode == StepMode.into:
+            return True
+        if self._step_mode == StepMode.out and event == 'return':
+            return frame == self._single_step_frame
+        return False
+
+
+
     def _dispatch_trace(self, frame: types.FrameType, event, arg):
         if self._is_first_call and self._main_file == Path(frame.f_code.co_filename):
             self._is_first_call = False
             self._breakpoint(frame, show_context=False, reason="start")
             return self._default_dispatch(frame, event, arg)
-        if self._single_step and (frame == self._single_step_frame or self._step_into):
-            if self._single_step and event == 'return':
+        if self._should_single_step(frame, event):
+            if event == 'return':
                 if frame.f_back:
                     frame.f_back.f_trace_lines = True
                     self._single_step_frame = frame.f_back
                     self._breakpoint(frame.f_back, reason="step")
+                    if self._step_mode == StepMode.out:
+                        self._step_mode = StepMode.step
                 return
-            if self._single_step and event == 'line':
+            if self._step_mode == StepMode.out:
+                return
+            if event == 'line':
                 self._single_step = False
                 self._breakpoint(frame, reason="step")
                 return
@@ -425,7 +466,8 @@ if __name__ == '__main__':
     args = argparser.parse_args()
     dbg = Dbg()
     print("Tiny debugger https://github.com/parttimenerd/python-dbg/")
-    print("Install bpython for a better debugging experience")
+    if not dbg.bpython:
+        print("Install bpython for a better debugging experience")
     try:
         dbg.run(Path(args.file))
     except KeyboardInterrupt:
