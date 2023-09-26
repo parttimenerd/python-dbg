@@ -100,7 +100,9 @@ class Dbg:
         self._breakpoint_to_scope_start: Dict[Path, Dict[int, int]] = {}
         self._is_first_call = True
         self._single_step = False
-        self._single_step_frame: types.FrameType = None
+        self._single_step_frame: Optional[types.FrameType] = None
+        self._step_into = False
+        """ if true, step into functions when single stepping """
 
     def add_breakpoint(self, file: Path, line: int, scope_start_line: int):
         if file not in self._breakpoints_in_files:
@@ -217,7 +219,7 @@ class Dbg:
         def _cont():
             """continue the program execution"""
             if self._single_step_instead_of_continue:
-                step()
+                step(self._single_step_instead_of_continue_into is True)
             else:
                 raise SystemExit(DbgContinue(exit=False))
 
@@ -290,7 +292,7 @@ class Dbg:
             """break at line in file, -1 first line in function"""
             start_line = find_function(func, file)
             if start_line is not None:
-                self.add_breakpoint(Path(file), start_line if line == -1 else line, start_line)
+                self.add_breakpoint(Path(file), start_line + 1 if line == -1 else line, start_line)
             else:
                 print("No such function")
 
@@ -316,16 +318,26 @@ class Dbg:
                     remove_all_breaks(str(file))
 
         @func
-        def step():
-            """make a single step"""
+        def step(into=False):
+            """make a single step, into (default:False) to step into calls"""
             self._single_step = True
             self._single_step_frame = frame
+            self._step_into = into
             raise SystemExit(DbgContinue(exit=False))
 
         @func
-        def single_stepping(enable: bool):
-            """enable and disable to step instead of continue"""
+        def step_into():
+            """make a single step and step into calls"""
+            step(into=True)
+
+        @func
+        def single_stepping(enable: bool, into = False):
+            """
+            enable and disable to step instead of continue,
+            into (default:False) to step into calls
+            """
             self._single_step_instead_of_continue = enable
+            self._single_step_instead_of_continue_into = into
 
         @func
         def dbg_help():
@@ -377,7 +389,7 @@ class Dbg:
             self._is_first_call = False
             self._breakpoint(frame, show_context=False, reason="start")
             return self._default_dispatch(frame, event, arg)
-        if self._single_step and frame == self._single_step_frame:
+        if self._single_step and (frame == self._single_step_frame or self._step_into):
             if self._single_step and event == 'return':
                 if frame.f_back:
                     frame.f_back.f_trace_lines = True
@@ -390,7 +402,6 @@ class Dbg:
                 return
         if event == 'call':
             if self._has_break_point_in(frame.f_code):
-                self._handle_line(frame)
                 return self._dispatch_trace
             else:
                 return self._default_dispatch(frame, event, arg)
