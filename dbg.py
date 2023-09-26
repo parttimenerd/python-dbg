@@ -369,19 +369,20 @@ class Dbg:
 
     def _default_dispatch(self, frame: types.FrameType, event, arg):
         if event == 'call':
-            pass
+            frame.f_trace_lines = True
+            return self._dispatch_trace
 
     def _dispatch_trace(self, frame: types.FrameType, event, arg):
         if self._is_first_call and self._main_file == Path(frame.f_code.co_filename):
             self._is_first_call = False
             self._breakpoint(frame, show_context=False, reason="start")
-            return
+            return self._default_dispatch(frame, event, arg)
         if self._single_step and frame == self._single_step_frame:
             if self._single_step and event == 'return':
                 if frame.f_back:
                     frame.f_back.f_trace_lines = True
                     self._single_step_frame = frame.f_back
-                    print("returning from", frame.f_code.co_name)
+                    self._breakpoint(frame.f_back, reason="step")
                 return
             if self._single_step and event == 'line':
                 self._single_step = False
@@ -391,6 +392,8 @@ class Dbg:
             if self._has_break_point_in(frame.f_code):
                 self._handle_line(frame)
                 return self._dispatch_trace
+            else:
+                return self._default_dispatch(frame, event, arg)
         elif event == 'line':
             self._handle_line(frame)
 
