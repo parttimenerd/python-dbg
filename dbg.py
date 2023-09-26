@@ -251,7 +251,10 @@ class Dbg:
 
         @func
         def show(file=None, start=1, end=-1, header=None):
-            """show code"""
+            """
+            show code, file (default:None, current file),
+            start (default:1), end (default:-1)
+            """
             code = Path(file or frame.f_code.co_filename).read_text()
             self.print_code(code=code,
                             breakpoints=self.get_breakpoints(Path(file or frame.f_code.co_filename)),
@@ -261,7 +264,10 @@ class Dbg:
 
         @func
         def context(pre: int = 4, post: int = 4):
-            """show context"""
+            """
+            show context of current location,
+            pre (default:4) lines before, post (default:4) lines after
+            """
             show(start=frame.f_lineno - pre, end=frame.f_lineno + post)
 
         @func
@@ -276,7 +282,9 @@ class Dbg:
 
         @func
         def show_function(func=None):
-            """show function"""
+            """
+            show code of function, func (default:None) current function
+            """
             if func is None:
                 co = frame.f_code
                 file = None
@@ -286,7 +294,7 @@ class Dbg:
             show(file, start=co.co_firstlineno, end=co.co_firstlineno + len(inspect.getsource(co).splitlines()) - 1)
 
         @func
-        def break_at_func(func: Callable, line: int = -1):
+        def break_at_func(func: Callable = None, line: int = -1):
             """break at function (optional line number)"""
             self.add_breakpoint(Path(inspect.getsourcefile(func)), line, func.__code__.co_firstlineno)
 
@@ -300,19 +308,20 @@ class Dbg:
                 print("No such function")
 
         @func
-        def remove_break(func: Callable, line: int = -1):
-            """remove breakpoint"""
+        def remove_break(func: Callable, line: int):
+            """remove breakpoint in function object"""
             self.remove_breakpoint(Path(inspect.getsourcefile(func)), line, func.__code__.co_firstlineno)
 
         @func
         def remove_break_at_line(file: str, func: str, line: int):
-            """remove breakpoint"""
+            """remove breakpoint in function"""
             start_line = find_function(func, file)
             if start_line is not None:
                 self.remove_breakpoint(Path(file), line, start_line)
 
         @func
         def remove_all_breaks(file: Optional[str] = None):
+            """remove all breakpoints, in the file or all files if file is None"""
             if file:
                 for line in list(self.get_breakpoints(Path(file))):
                     self.remove_breakpoint(Path(file), line, self._breakpoint_to_scope_start[Path(file)][line])
@@ -371,7 +380,9 @@ class Dbg:
             longest = max(len(k) for k in parts.keys())
             print("  Ctrl-D to continue")
             for k, v in parts.items():
-                print(f"  {k:<{longest}}   {v}")
+                prefix = f"  {k:<{longest}}   "
+                p = '\n' + ' ' * len(prefix)
+                print(f"{prefix}{p.join(v.splitlines())}")
 
         helpers["_st"] = self._st
         helpers["_frame"] = frame
