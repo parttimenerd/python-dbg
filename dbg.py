@@ -62,6 +62,13 @@ class StepMode(Enum):
     """step out of the current function"""
 
 
+@dataclass
+class StepState:
+    mode: StepMode
+    frame: types.FrameType
+    """current frame"""
+
+
 class Dbg:
 
     def __init__(self):
@@ -110,9 +117,7 @@ class Dbg:
         # file -> {line number of breakpoint -> starting line number of scope}
         self._breakpoint_to_scope_start: Dict[Path, Dict[int, int]] = {}
         self._is_first_call = True
-        self._single_step = False
-        self._single_step_frame: Optional[types.FrameType] = None
-        self._step_mode = StepMode.over
+        self._single_step: Optional[StepState] = None
         """ if true, step into functions when single stepping """
         self._single_step_instead_of_continue = False
         self._single_step_instead_of_continue_into = False
@@ -356,9 +361,8 @@ class Dbg:
 
         def _step_setup(into=False, out=False):
             assert not (into and out)
-            self._single_step = True
-            self._single_step_frame = frame
-            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.over
+            self._single_step = StepState(into and StepMode.into or out
+                                          and StepMode.out or StepMode.over, frame)
 
         @func
         def step(into=False, out=False):
@@ -366,6 +370,7 @@ class Dbg:
             make a single step, into (default:False) to step into calls too,
             out (default:False) to step out of calls only
             """
+            self._single_step_instead_of_continue = False
             _step_setup(into, out)
             raise SystemExit(DbgContinue(exit=False))
 
@@ -436,6 +441,7 @@ class Dbg:
             if (p, frame.f_lineno) in self._breakpoint_conditions:
                 return eval(self._breakpoint_conditions[(p, frame.f_lineno)], frame.f_globals, frame.f_locals)
             return True
+        return False
 
     def _handle_line(self, frame: types.FrameType):
         if self._should_break_at(frame):
@@ -448,12 +454,12 @@ class Dbg:
     def _should_single_step(self, frame: types.FrameType, event) -> bool:
         if not self._single_step:
             return False
-        if self._step_mode == StepMode.over:
-            return frame == self._single_step_frame
-        if self._step_mode == StepMode.into:
+        if self._single_step.mode == StepMode.over:
+            return frame == self._single_step.frame
+        if self._single_step.mode == StepMode.into:
             return True
-        if self._step_mode == StepMode.out and event == 'return':
-            return frame == self._single_step_frame
+        if self._single_step.mode == StepMode.out and event == 'return':
+            return frame == self._single_step.frame
         return False
 
     def _dispatch_trace(self, frame: types.FrameType, event, arg):
@@ -467,15 +473,13 @@ class Dbg:
         if self._should_single_step(frame, event):
             if event == 'return':
                 if frame.f_back:
-                    self._single_step_frame = frame.f_back
+                    self._single_step.frame = frame.f_back
                     self._breakpoint(frame.f_back, reason="step")
-                    if self._step_mode == StepMode.out:
-                        self._step_mode = StepMode.over
                 return
-            if self._step_mode == StepMode.out:
+            if self._single_step.mode == StepMode.out:
                 return
             if event == 'line':
-                self._single_step = False
+                self._single_step = None
                 self._breakpoint(frame, reason="step")
                 return
         if event == 'call':

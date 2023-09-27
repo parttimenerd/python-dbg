@@ -52,17 +52,17 @@ We can use the debugging shell to set a breakpoint in the `callee` function
 at line 2:
 
 ```python
-    >>> break_at_line("test.py", "callee", 2)
-    >>> show("test.py")
-    >  1   def callee(i):         # current line, we are at the first line of the file
-       2 *     i = i + 1          # * mark lines with breakpoints
-       3       return i + 1
-       4    
-       5
-       6   def caller(i):
-       7       j = i * 2
-       8       j = callee(j)
-       9       return j + 1
+>>> break_at_line("test.py", "callee", 2)
+>>> show("test.py")
+>  1   def callee(i):         # current line, we are at the first line of the file
+   2 *     i = i + 1          # * marks lines with breakpoints
+   3       return i + 1
+   4    
+   5
+   6   def caller(i):
+   7       j = i * 2
+   8       j = callee(j)
+   9       return j + 1
 ```
 
 Ctrl-D / `cont()` let us continue execution until the breakpoint is hit:

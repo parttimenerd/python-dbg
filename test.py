@@ -10,3 +10,4 @@ def caller(i):
 
 
 caller(10)
+caller(20)
