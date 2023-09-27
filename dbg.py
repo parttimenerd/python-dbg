@@ -53,9 +53,13 @@ def find_function(funcname: str, filename: str) -> Optional[int]:
 
 
 class StepMode(Enum):
-    step = 0
+    """step modes"""
+    over = 0
+    """step over lines"""
     into = 1
+    """step and step into functions"""
     out = 2
+    """step out of the current function"""
 
 
 class Dbg:
@@ -108,7 +112,7 @@ class Dbg:
         self._is_first_call = True
         self._single_step = False
         self._single_step_frame: Optional[types.FrameType] = None
-        self._step_mode = StepMode.step
+        self._step_mode = StepMode.over
         """ if true, step into functions when single stepping """
         self._single_step_instead_of_continue = False
         self._single_step_instead_of_continue_into = False
@@ -117,6 +121,12 @@ class Dbg:
     def add_breakpoint(self, file: Path, line: int, scope_start_line: int, condition: Optional[str] = None):
         if file not in self._breakpoints_in_files:
             self._breakpoints_in_files[file] = set()
+        if line in self._breakpoints_in_files[file]:
+            print("Breakpoint already set")
+            if condition:
+                self._breakpoint_conditions[(file, line)] = condition
+                print("Condition updated")
+            return
         self._breakpoints_in_files[file].add(line)
         if file not in self._scopes_with_breakpoint:
             self._scopes_with_breakpoint[file] = {}
@@ -128,6 +138,7 @@ class Dbg:
         self._breakpoint_to_scope_start[file][line] = scope_start_line
         if condition:
             self._breakpoint_conditions[(file, line)] = condition
+        print("Breakpoint set")
 
     def remove_breakpoint(self, file: Path, line: int, scope_start_line: int):
         if file in self._breakpoints_in_files:
@@ -138,6 +149,7 @@ class Dbg:
                     del self._scopes_with_breakpoint[file][scope_start_line]
             del self._breakpoint_to_scope_start[file][line]
             del self._breakpoint_conditions[(file, line)]
+            print("Breakpoint removed")
 
     def _get_breakpoint_condition(self, file: Path, line: int) -> Optional[str]:
         if (file, line) in self._breakpoint_conditions:
@@ -146,7 +158,7 @@ class Dbg:
     def get_breakpoints(self, file: Path) -> Dict[int, Optional[str]]:
         if file not in self._breakpoints_in_files:
             return {}
-        return {b:self._get_breakpoint_condition(file, b) for b in self._breakpoints_in_files[file]}
+        return {b: self._get_breakpoint_condition(file, b) for b in self._breakpoints_in_files[file]}
 
     """
     Print code on the command line
@@ -294,7 +306,7 @@ class Dbg:
             print("".join(traceback.format_stack(frame)))
 
         @func
-        def show_function(func=None):
+        def show_function(func: Callable = None):
             """
             show code of function, func (default:None) current function
             """
@@ -346,7 +358,7 @@ class Dbg:
             assert not (into and out)
             self._single_step = True
             self._single_step_frame = frame
-            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.step
+            self._step_mode = into and StepMode.into or out and StepMode.out or StepMode.over
 
         @func
         def step(into=False, out=False):
@@ -436,7 +448,7 @@ class Dbg:
     def _should_single_step(self, frame: types.FrameType, event) -> bool:
         if not self._single_step:
             return False
-        if self._step_mode == StepMode.step:
+        if self._step_mode == StepMode.over:
             return frame == self._single_step_frame
         if self._step_mode == StepMode.into:
             return True
@@ -458,7 +470,7 @@ class Dbg:
                     self._single_step_frame = frame.f_back
                     self._breakpoint(frame.f_back, reason="step")
                     if self._step_mode == StepMode.out:
-                        self._step_mode = StepMode.step
+                        self._step_mode = StepMode.over
                 return
             if self._step_mode == StepMode.out:
                 return
