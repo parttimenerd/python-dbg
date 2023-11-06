@@ -627,11 +627,7 @@ class Dbg:
 
         :param modified_code_ids: code ids with added or removed breakpoints
         """
-        raise NotImplementedError()
-
-    def _setup(self):
-        """ Setup the debugger hooks """
-        raise NotImplementedError()
+        pass
 
     def run(self, file: Path):
         """ Run a given file with the debugger """
@@ -640,7 +636,6 @@ class Dbg:
         compiled = compile(file.read_text(), filename=file.name, mode='exec')
         sys.argv.pop(0)
         sys.breakpointhook = self._breakpoint
-        self._setup()
         exec(compiled, _globals)
 
 
@@ -648,6 +643,10 @@ class SetTraceDbg(Dbg):
     """
     sys.settrace based debugger
     """
+
+    def __init__(self):
+        super().__init__()
+        sys.settrace(self._dispatch_trace)
 
     def _should_break_at(self, frame: types.FrameType) -> bool:
         breakpoint = self.manager.get_breakpoint(frame.f_code, frame.f_lineno)
@@ -705,11 +704,6 @@ class SetTraceDbg(Dbg):
         elif event == 'line':
             self._handle_line(frame)
 
-    def _post_process(self, modified_code_ids: Set[CodeId]):
-        pass
-
-    def _setup(self):
-        sys.settrace(self._dispatch_trace)
 
 
 if __name__ == '__main__':
