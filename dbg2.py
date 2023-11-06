@@ -19,9 +19,12 @@ _globals = globals().copy()
 class CodeId:
     """ Identifier of a code object (like a function) """
     path: Path
-    """ File that the code object lives in """
+    """ File that the code object lives in, has to be an absolute path """
     start_line: int
     """ Line number of the first line of the code object """
+
+    def __post_init__(self):
+        assert self.path.is_absolute()
 
 
 @dataclass(frozen=True)
@@ -86,12 +89,15 @@ class FileManager:
         """ file -> DbgFile """
         self.codes_with_breakpoints: Set[CodeId] = set()
         """ code ids that have breakpoints """
+        self.codeinfos_possibly_without_code_objects: Set[CodeId] = set()
+        """ code ids that might not have code objects """
 
-    def __getitem__(self, item: Path) -> DbgFile:
+    def __getitem__(self, path: Path) -> DbgFile:
         """ Get the DbgFile for a file """
-        if item not in self._per_file:
-            self._per_file[item] = DbgFile(item)
-        return self._per_file[item]
+        path = path.absolute()
+        if path not in self._per_file:
+            self._per_file[path] = DbgFile(path)
+        return self._per_file[path]
 
     # based on https://github.com/python/cpython/blob/17a335dd0291d09e1510157a4ebe02932ec632dd/Lib/pdb.py#L97
     @staticmethod
@@ -113,7 +119,7 @@ class FileManager:
         with fp:
             for lineno, line_str in enumerate(fp, start=1):
                 if cre.match(line_str) and lineno <= line:
-                    return CodeId(file, lineno + 1)
+                    return CodeId(file.absolute(), lineno)
         return None
 
     def get_breakpoints(self, file: Path) -> Dict[int, Breakpoint]:
@@ -122,6 +128,7 @@ class FileManager:
 
     def set_code_object(self, code_id: CodeId, code: types.CodeType):
         self[code_id.path].set_code_object(code_id, code)
+        self.codeinfos_possibly_without_code_objects.discard(code_id)
 
     def add_breakpoint(self, code_id: CodeId, line: int = -1,
                        condition: Optional[str] = None):
@@ -133,6 +140,8 @@ class FileManager:
         br = Breakpoint(code_id, line, condition)
         self[code_id.path].add_breakpoint(br)
         self.codes_with_breakpoints.add(code_id)
+        if self[code_id.path][code_id].code is None:
+            self.codeinfos_possibly_without_code_objects.add(code_id)
 
     def remove_breakpoint(self, code_id: CodeId, line: int):
         """ Remove a breakpoint at a given line in a given code object """
@@ -165,10 +174,15 @@ class FileManager:
         """ Check if a code object has breakpoints """
         return code_id in self.codes_with_breakpoints
 
-    def has_breakpoints_in_code_object(self, code: types.CodeType) -> bool:
-        """ Check if a code object has breakpoints """
-        return self.has_breakpoints_in_code(
-            CodeId(Path(code.co_filename), code.co_firstlineno))
+    def has_breakpoints_in_code_object_and_update(self, code: types.CodeType) \
+            -> bool:
+        """
+        Check if a code object has breakpoints and set the code object if needed
+        """
+        id = CodeId(Path(code.co_filename).absolute(), code.co_firstlineno)
+        if id in self.codeinfos_possibly_without_code_objects:
+            self.set_code_object(id, code)
+        return self.has_breakpoints_in_code(id)
 
     def get_code_info(self, code_id: CodeId) -> CodeInfo:
         return self[code_id.path][code_id]
@@ -629,13 +643,17 @@ class Dbg:
         """
         pass
 
+    def _process_compiled_code(self, code: types.CodeType):
+        pass
+
     def run(self, file: Path):
         """ Run a given file with the debugger """
         self._main_file = file
         # see https://realpython.com/python-exec/#using-python-for-configuration-files
-        compiled = compile(file.read_text(), filename=file.name, mode='exec')
+        compiled = compile(file.read_text(), filename=str(file), mode='exec')
         sys.argv.pop(0)
         sys.breakpointhook = self._breakpoint
+        self._process_compiled_code(compiled)
         exec(compiled, _globals)
 
 
@@ -696,14 +714,13 @@ class SetTraceDbg(Dbg):
                 self._breakpoint(frame, reason="step")
                 return
         if event == 'call':
-            if self.manager.has_breakpoints_in_code_object(
+            if self.manager.has_breakpoints_in_code_object_and_update(
                     frame.f_code) is not None:
                 return self._dispatch_trace
             else:
                 return self._default_dispatch(event)
         elif event == 'line':
             self._handle_line(frame)
-
 
 
 if __name__ == '__main__':
