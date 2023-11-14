@@ -10,7 +10,7 @@ from code import InteractiveConsole
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional, Dict, Set
+from typing import Callable, Optional, Dict, Set, Union
 
 _globals = globals().copy()
 
@@ -267,7 +267,7 @@ class CodeFormatter:
                 prefix = (">" if current_line == line_number else " ") + " "
                 if breakpoints and line_number in breakpoints:
                     suffix = "*"
-                    if breakpoints[line_number] is not None:
+                    if breakpoints[line_number].condition is not None:
                         suffix += " " + breakpoints[line_number].condition
             return prefix + line_number_part + suffix
 
@@ -469,7 +469,11 @@ class Dbg:
             Show code, file (default:None, current file),
             start (default:1), end (default:-1)
             """
-            code = Path(file or frame.f_code.co_filename).read_text()
+            path = Path(file or frame.f_code.co_filename)
+            if not path.exists():
+                print(f"File {path} does not exist")
+                return
+            code = path.read_text()
             self.code_formatter.print_code(code=code, breakpoints=self.manager[
                 Path(file or frame.f_code.co_filename)].breakpoints,
                                            current_line=frame.f_lineno,
@@ -509,11 +513,14 @@ class Dbg:
                 inspect.getsource(co).splitlines()) - 1)
 
         @func
-        def break_at_func(func: Callable = None, line: int = -1,
+        def break_at_func(func: Union[Callable, str] = None, line: int = -1,
                           condition: Optional[str] = None):
             """
-            Break at function (optional line number, optional condition string)
+            Break at function object / name (optional line number, optional condition string)
             """
+            if isinstance(func, str):
+                break_at_line(frame.f_code.co_filename, func, line, condition)
+                return
             code = _code_object(func)
             id = _code_id(code)
             self.manager.add_breakpoint(id, line, condition)
@@ -527,6 +534,12 @@ class Dbg:
             Break at line in file, -1 first line in function,
             optional condition string
             """
+            path = Path(file)
+            if not path.exists():
+                path = Path(frame.f_code.co_filename).parent / file
+            if not path.exists():
+                print(f"File {path} does not exist")
+                return
             code_id = self.manager.find_code(Path(file), func,
                                              line if line != -1 else None)
             if code_id is not None:
@@ -654,7 +667,7 @@ class Dbg:
         sys.argv.pop(0)
         sys.breakpointhook = self._breakpoint
         self._process_compiled_code(compiled)
-        exec(compiled, _globals)
+        exec(compiled, _globals | {"__name__": "__main__", "__file__": str(file)})
 
 
 class SetTraceDbg(Dbg):
