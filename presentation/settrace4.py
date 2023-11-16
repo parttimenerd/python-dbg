@@ -10,7 +10,7 @@ from util import shell
 
 @dataclass(frozen=True)
 class Breakpoint:
-    function: str
+    file: str
     line: int
 
 
@@ -19,13 +19,13 @@ breakpoints: Set[Breakpoint] = set()
 
 
 def dbg_shell(frame: FrameType):
-    def add_breakpoint(function: str, line: int):
-        global breakpoints
-        breakpoints.add(Breakpoint(function, line))
+    global breakpoints
 
-    def remove_breakpoint(function: str, line: int):
-        global breakpoints
-        breakpoints.remove(Breakpoint(function, line))
+    def add_breakpoint(file: str, line: int):
+        breakpoints.add(Breakpoint(file, line))
+
+    def remove_breakpoint(file: str, line: int):
+        breakpoints.remove(Breakpoint(file, line))
 
     shell(_locals=frame.f_locals | {"frame": frame,
                                     "br": add_breakpoint,
