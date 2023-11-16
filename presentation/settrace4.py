@@ -29,7 +29,8 @@ def dbg_shell(frame: FrameType):
 
     shell(_locals=frame.f_locals | {"frame": frame,
                                     "br": add_breakpoint,
-                                    "rm": remove_breakpoint},
+                                    "rm": remove_breakpoint,
+                                    "brs": breakpoints},
           _globals=frame.f_globals)
 
 

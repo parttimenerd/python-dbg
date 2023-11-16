@@ -29,7 +29,7 @@ def main():
         case _:
             raise ValueError(f"Unknown operation {cmd}")
 
-print(__name__)
+
 if __name__ == "__main__":
     if len(sys.argv) == 4:
         __import__(sys.argv[3])
